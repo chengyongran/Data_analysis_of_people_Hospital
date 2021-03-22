@@ -1,0 +1,515 @@
+---
+title: "省人民医院"
+author: "程永然"
+date: "2021/1/31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r }
+library("survival")
+library("survMisc")
+library("ggplot2")
+library("dplyr")
+library("ggpubr")
+library("survminer")
+```
+
+##对照组和脑梗组总的生存差异
+```{r,echo=FALSE }
+data1<-read.csv("D:/keyan/new_people_hospital/control_brain_group_sur.csv")
+a<-subset(data1,data1$group=="brain")  
+b<-subset(data1,data1$group=="control") 
+set.seed(13)
+b1<-b[sample(nrow(b),size=147,replace=TRUE),] 
+data1<-rbind(a,b1)
+fit <- survfit(Surv(data1$time1,data1$status1==1) ~ group , data = data1)
+ggsurvplot(fit,
+           pval = TRUE, conf.int =F,
+           risk.table = TRUE, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata", # Change line type by groups
+           palette = c("#E7B800", "#2E9FDF")
+)
+
+fit <- survfit(Surv(data1$time1,data1$status1==1) ~ Gender , data = data1)
+ggsurvplot(fit,
+           pval = TRUE, conf.int = F,
+           risk.table = TRUE, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata", # Change line type by groups
+           palette = c("#E7B800", "#2E9FDF")
+)
+
+```
+
+##考虑性别影响，单因素筛选：剔除性别造成的差异指标
+```{r,echo=FALSE }
+data<-read.csv("D:/keyan/new_people_hospital/brain_control_sex.csv")
+control_group<-subset(data,data$Gender=="男")
+control_group1<-control_group[,3:74]
+brain_group<-subset(data,data$Gender=="女")
+brain_group1<-brain_group[,3:74]
+
+n<-ncol(control_group1)
+n1<-ncol(brain_group1)
+re<-NULL
+for (i in 1:n) {
+  #i=74
+  a<-control_group1[,i]
+  b<-brain_group1[,i]
+  n3<-length(a)
+  n4<-length(b)
+  chuli<-rep(c('control_group','brain_group'),
+             c(n3,n4))
+  chanliang<-c(a,b)
+  jieguo=data.frame(chanliang,chuli)
+  fit<-aov(chanliang~chuli,data=jieguo)
+  p<-summary(fit)
+  d<-p[[1]][5] 
+  
+  re[i]<-as.numeric(d$`Pr(>F)`)[1] 
+}
+
+result<-matrix(0,n1,1)
+result[,1]<-re
+row.names(result)<-colnames(control_group)[3:74]
+colnames(result)<-c("p_value")
+name<-subset(result,result[,1]>0.05)
+nrow(name)
+name
+```
+
+##对照组和脑梗阻，筛选，单因素分析
+```{r,echo=FALSE }
+
+data<-read.csv("D:/keyan/new_people_hospital/da.csv")
+control_group<-subset(data,data$group=="control")
+control_group1<-control_group[,2:42]
+brain_group<-subset(data,data$group=="brain")
+brain_group1<-brain_group[,2:42]
+
+n<-ncol(control_group1)
+n1<-ncol(brain_group1)
+re<-NULL
+for (i in 1:n) {
+  #i=41
+  a<-as.numeric(control_group1[,i])  
+  b<-as.numeric(brain_group1[,i])
+  n3<-length(a)
+  n4<-length(b)
+  chuli<-rep(c('control_group','brain_group'),
+             c(n3,n4))
+  chanliang<-c(a,b)
+  jieguo=data.frame(chanliang,chuli)
+  fit<-aov(chanliang~chuli,data=jieguo)
+  p<-summary(fit)
+  d<-p[[1]][5] 
+  
+  re[i]<-as.numeric(d$`Pr(>F)`)[1] 
+}
+result<-matrix(0,n1,1)
+result[,1]<-re
+colnames(result)<-c("p_value")
+row.names(result)<-colnames(control_group)[2:42]
+name<-subset(result,result[,1]<0.05)
+nrow(name)
+
+name
+
+```
+
+##相关性
+```{r,echo=FALSE }
+data<-read.csv("D:/keyan/new_people_hospital/brain_group.csv")
+index<-rownames(name)
+da1<-subset(data,select=index)
+library(corrplot)
+corrplot(cor(da1))
+```
+
+
+##lasso筛选变量
+```{r,echo=FALSE }
+##基于lasoo去选择
+data<-read.csv("D:/keyan/new_people_hospital/brain_final.csv")
+n<-ncol(data)
+library("glmnet")
+x<-as.matrix(data[,4:n])
+time<-data$time
+status<-data$status1
+y<-Surv(time,status)
+```
+
+
+##通过交叉验证去选择最优的惩罚系数，确定变量个数
+```{r,echo=FALSE }
+set.seed(15)
+cv.fit<-cv.glmnet(x,y,family="cox",alpha=1)
+plot(cv.fit)
+```
+
+###确定最终纳入的变量指标
+```{r,echo=FALSE }
+
+abs(coef(cv.fit,s="lambda.min")*100)
+```
+
+##散点图：看下选的指标在对照组和脑梗阻的差异
+```{r,echo=FALSE }
+
+library(ggpubr)   
+library(ggplot2)
+data<-read.csv("D:/keyan/new_people_hospital/brain_final.csv")
+data1<-read.csv("D:/keyan/new_people_hospital/control_group_final_new.csv")
+re<-list()
+x1<-data$细胞毒T细胞比例
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$细胞毒T细胞比例
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p1<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title = "细胞毒T细胞比例")
+
+
+re<-list()
+x1<-data$CD56.high.NK细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$CD56.high.NK细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p3<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title="总Treg绝对数")
+
+re<-list()
+x1<-data$总Treg绝对数
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$总Treg绝对数
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p2<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title = "CD56.high.NK细胞绝对数")
+
+
+re<-list()
+x1<-data$记忆B细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$记忆B细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p4<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title = "记忆B细胞绝对数")
+
+re<-list()
+x1<-data$总单核细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$总单核细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p5<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title = "总单核细胞绝对数")
+
+re<-list()
+x1<-data$非经典型单核细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$非经典型单核细胞绝对数
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p6<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title = "非经典型单核细胞绝对数")
+
+re<-list()
+x1<-data$CD16..NK细胞绝对数.1
+n1<-length(x1)
+f1<-factor(rep(c("brain"), each=n1))
+re1<- data.frame(x1,f1)
+x1<-data1$CD16..NK细胞绝对数.1
+n1<-length(x1)
+f1<-factor(rep(c("control"), each=n1))
+re2<- data.frame(x1,f1)
+re[[1]]<-re1
+re[[2]]<-re2
+ree<-rbind(re[[1]],re[[2]])
+p7<-ggboxplot(ree, x="f1", y="x1", color = "f1", xlab=" ",ylab=" ",
+              palette = "jco", add = "jitter",title = "CD16..NK细胞绝对数.1")
+
+
+p1
+p2
+p3
+p4
+p5
+p6
+p7
+```
+
+##cox单因素分析：计算HR
+```{r,echo=FALSE }
+cox=read.csv("D:/keyan/new_people_hospital/cox_sig1.csv",header=T) #森林图需要HR值，和HR的95%置信区间上下限
+cox$group = ifelse(cox$lower >1|cox$upper <1,"red3", "black")  #对有意义的变量标红
+library(ggplot2)
+ggplot(data=cox)+
+  aes(x=hr,y=reorder(X,hr))+ #根据HR值对纵坐标的变量排序
+  geom_errorbarh(aes(xmax=upper,xmin=lower),color=cox$group,height=0,size=1)+ #画出HR值上下限
+  geom_point(size=2.5,shape=20,color=cox$group)+ #画出HR值
+  geom_vline(xintercept=1,linetype="dashed",size=0.2,color="darkblue")+ #在1处标蓝色虚线
+  coord_trans(x="log2")+ #对X轴取log
+  scale_x_continuous(limits=c(0.5,2.5),breaks=c(0.7,1,1.3,1.6,1.9,2.2))+ #规定X轴上下限和需要显示的坐标
+  labs(x="Hazard ratio",y="")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank()) #去除多余杂线
+```
+##进一步分析这最终选的7个指标表达高低对生存是否有差异：分类标准是根据ROC曲线的AUC阈值选择最佳分类值
+##根据AUC值选出最佳临界值
+```{r,echo=FALSE }
+AUC<-c(0.71,0.97,0.46,0.636,0.96,0.66,0.86)
+cut_off<-c(14.025,10.317,32.181,38.522,294.522,20.755,5.8659)
+name<-c("细胞毒T细胞比例","CD56.high.NK细胞绝对数","总Treg绝对数","记忆B细胞绝对数",
+        "总单核细胞绝对数","非经典型单核细胞绝对数","CD16+NK细胞绝对数.1")
+value<-data.frame(name,AUC,cut_off)
+value
+
+```
+
+##k-m曲线
+```{r,echo=FALSE }
+##细胞毒T细胞比例
+data<-read.csv("D:/keyan/new_people_hospital/ROC.csv")
+a<-data$细胞毒T细胞比例
+a1<-14.025
+data1<-subset(data,data$细胞毒T细胞比例>=a1)
+status1<-data1$status1
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$细胞毒T细胞比例<a1)
+status1<-data2$status1
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="细胞毒T细胞比例",
+           pval = 0.043, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+
+##总Treg绝对数
+data<-read.csv("D:/keyan/new_people_hospital/ROC.csv")
+a<-data$总Treg绝对数
+a1<-32.181
+data1<-subset(data,data$总Treg绝对数>=a1)
+status1<-data1$status1
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$总Treg绝对数<a1)
+status1<-data2$status1
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="总Treg绝对数",
+           pval = TRUE, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+###CD56.high.NK细胞绝对数
+data<-read.csv("D:/keyan/new_people_hospital/ROC.csv")
+a<-data$CD56.high.NK细胞绝对数
+a1<-10.317
+data1<-subset(data,data$CD56.high.NK细胞绝对数>=a1)
+status1<-data1$status
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$CD56.high.NK细胞绝对数<a1)
+status1<-data2$status
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="CD56.high.NK细胞绝对数",
+           pval = TRUE, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+###
+data<-read.csv("D:/keyan/new_people_hospital/ROC.csv")
+a<-data$记忆B细胞绝对数
+mean(a)
+a1<-38.522
+data1<-subset(data,data$记忆B细胞绝对数>=a1)
+status1<-data1$status
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$记忆B细胞绝对数<a1)
+status1<-data2$status
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="记忆B细胞绝对数",
+           pval = TRUE, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+###
+data<-read.csv("D:/keyan/new_people_hospital/ROC.csv")
+a<-data$总单核细胞绝对数
+a1<-294.522
+data1<-subset(data,data$总单核细胞绝对数>=a1)
+status1<-data1$status
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$总单核细胞绝对数<a1)
+status1<-data2$status
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="总单核细胞绝对数",
+           pval = TRUE, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+
+##
+data<-read.csv("D:/keyan/new_people_hospital/ROC.csv")
+a<-data$非经典型单核细胞绝对数
+a1<-20.775
+data1<-subset(data,data$非经典型单核细胞绝对数>=a1)
+status1<-data1$status
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$非经典型单核细胞绝对数<a1)
+status1<-data2$status
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="非经典型单核细胞绝对数",
+           pval = 0.0056, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+##
+data<-read.csv("D:/keyan/new_people_hospital/brain_final.csv")
+a<-data$CD16..NK细胞绝对数.1
+a1<-5.8659
+data1<-subset(data,data$CD16..NK细胞绝对数.1>=a1)
+status1<-data1$status
+time1<-data1$time
+n1<-nrow(data1)
+f <- factor(rep(c("High"), each=n1))
+dataa1<- data.frame(status1,time1,f)
+
+data2<-subset(data,data$CD16..NK细胞绝对数.1<a1)
+status1<-data2$status
+time1<-data2$time
+n2<-nrow(data2)
+f <- factor(rep(c("Low"), each=n2))
+dataa2<- data.frame(status1,time1,f)
+dataa3<-rbind(dataa1,dataa2 )
+fit <- survfit(Surv(dataa3$time1,dataa3$status1==1) ~ f , data = dataa3)
+ggsurvplot(fit,title="CD16+NK细胞绝对数",
+           pval = 0.041, conf.int = F,
+           risk.table = F, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           linetype = "strata",
+           palette = c("#E7B800", "#2E9FDF")
+)
+```
+
+##多因素cox分析
+```{r,echo=FALSE }
+library(forestplot)
+rs_forest<-read.csv("D:/keyan/new_people_hospital/cox_duo.csv",header = F)
+forestplot(labeltext=as.matrix(rs_forest[,1:3])
+           ,mean = rs_forest$V4,lower = rs_forest$V5,
+           upper = rs_forest$V6,zero = 1, boxsize = 0.2
+           
+           , lineheight = unit(13,'mm'), colgap = unit(2,'mm'),lwd.zero = 2,
+           col=fpColors(box='#458B00',summary="#8B008B",lines = 'black',zero = '#7AC5CD'),xlab="Hazard ratio",
+           lwd.xaxis=3,lty.ci = "solid", graph.pos = 4)
+```
+
+
